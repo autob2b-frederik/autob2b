@@ -194,23 +194,163 @@ async function packagesPage() {
   adminShell('/dashboard/packages', '<h1>Indlæser…</h1>');
   const [pk, vs] = await Promise.all([api('GET', '/api/admin/packages'), api('GET', '/api/admin/vehicles')]);
   const free = vs.vehicles.filter((v) => v.status === 'available');
+  const byId = Object.fromEntries(free.map((v) => [v.id, v]));
+  const selected = new Set();
+  let priceTouched = false;
+
+  const rowHtml = (v) => {
+    const img = v.images && v.images[0] && !String(v.images[0]).endsWith('.heic')
+      ? `<img class="thumb" src="${esc(v.images[0])}" alt="">`
+      : '<div class="thumb pick-ph">🚗</div>';
+    const checked = selected.has(v.id) ? 'checked' : '';
+    const on = selected.has(v.id) ? ' on' : '';
+    return `<label class="pick-row${on}" data-id="${v.id}">
+      <input type="checkbox" name="vid" value="${v.id}" ${checked}>
+      ${img}
+      <div class="pick-meta">
+        <div class="pick-title"><b>${esc(v.make)} ${esc(v.model)}</b>${v.variant ? ` <span class="muted">${esc(v.variant)}</span>` : ''}</div>
+        <div class="pick-sub muted">${esc(v.vin)} · ${v.mileage != null ? num(v.mileage) + ' km' : '—'} · ${esc(L.fuel[v.fuel] || '—')}</div>
+      </div>
+      <div class="pick-price">${dkk(v.price)}</div>
+    </label>`;
+  };
+
   adminShell('/dashboard/packages', `<div class="pagehead"><h1>Bilpartier</h1></div><div id="msg"></div>
   <form id="f" class="formcard" novalidate><h2>Opret Parti</h2>
-    <div class="grid2"><div><label>Partinavn *</label><input name="name" required></div><div><label>Total Pris (DKK) *</label><input type="number" min="1" name="total_price" required></div></div>
-    <label>Beskrivelse</label><textarea name="description" rows="2"></textarea>
-    <label>Vælg biler i partiet (<span id="sc">0</span> valgt)</label>
-    <div class="pick">${free.length ? free.map((v) => `<label><input type="checkbox" name="vid" value="${v.id}"> <b>${esc(v.make)} ${esc(v.model)}</b> <span class="muted">${esc(v.vin)} · ${dkk(v.price)}</span></label>`).join('') : '<div class="muted" style="padding:.6rem">Ingen tilgængelige biler. Tilføj biler under Biler først.</div>'}</div>
-    <button class="btn" style="margin-top:1rem" type="submit">Opret Parti</button><div class="muted" style="font-size:.8rem;margin-top:.4rem">Alle godkendte forhandlere får en notifikation om det nye parti.</div></form>
+    <div class="grid2"><div><label>Partinavn *</label><input name="name" required placeholder="Fx Parti marts 20 stk."></div>
+    <div><label>Total Pris (DKK) *</label><input type="number" min="1" name="total_price" id="total_price" required placeholder="Udfyldes gerne automatisk"><div class="muted" style="font-size:.78rem;margin-top:.25rem">Tomt felt foreslås ud fra summen af valgte bilers katalogpris.</div></div></div>
+    <label>Beskrivelse</label><textarea name="description" rows="2" placeholder="Kort beskrivelse til forhandlerne"></textarea>
+    <label>Vælg biler i partiet</label>
+    <div class="muted pick-hint">Tip: vælg typisk 10 / 20 / 30 biler til et parti</div>
+    <div class="pick-toolbar">
+      <input type="search" id="pq" placeholder="Søg mærke, model, VIN eller variant…" autocomplete="off">
+      <select id="pfu"><option value="">Alle brændstoftyper</option>${Object.entries(L.fuel).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>
+      <input type="number" id="pmin" min="0" placeholder="Min. pris" title="Min. pris">
+      <input type="number" id="pmax" min="0" placeholder="Max. pris" title="Max. pris">
+    </div>
+    <div class="pick-actions">
+      <button type="button" class="btn small outline" id="psel">Vælg alle synlige</button>
+      <button type="button" class="btn small outline" id="pclr">Fjern valg</button>
+      <div class="pick-count" id="sc">0 valgt · katalogpris ca. 0 DKK</div>
+    </div>
+    <div class="pick-selected" id="chips" hidden></div>
+    <div class="pick" id="plist">${free.length ? '' : '<div class="muted" style="padding:.6rem">Ingen tilgængelige biler. Tilføj biler under Biler først.</div>'}</div>
+    <button class="btn" style="margin-top:1rem" type="submit">Opret Parti</button>
+    <div class="muted" style="font-size:.8rem;margin-top:.4rem">Alle godkendte forhandlere får en notifikation om det nye parti.</div>
+  </form>
   ${pk.packages.length ? `<div class="cards">${pk.packages.map((p) => `<div class="card"><div style="display:flex;justify-content:space-between;gap:.5rem"><h3>${esc(p.name)}</h3>${pill(L.vstatus, p.effective_status)}</div>
     <div class="price">${dkk(p.total_price)}</div><p class="muted">${esc(p.description || '')}</p>
     <p><b>${p.vehicle_count}</b> ${p.vehicle_count === 1 ? 'bil' : 'biler'}${p.vehicles.length ? ':' : ''}</p><ul style="margin:0 0 1rem 1.1rem;padding:0;font-size:.88rem">${p.vehicles.map((v) => `<li>${esc(v.make)} ${esc(v.model)} <span class="muted">${esc(v.vin)}</span></li>`).join('')}</ul>
     <button class="btn small danger" data-del="${p.id}" data-name="${esc(p.name)}">Slet Parti</button></div>`).join('')}</div>` : '<div class="tablewrap"><div class="empty">Ingen partier endnu.</div></div>'}`);
-  const upd = () => { sel('#sc').textContent = document.querySelectorAll('input[name=vid]:checked').length; };
-  document.querySelectorAll('input[name=vid]').forEach((c) => c.addEventListener('change', upd));
+
+  const visibleIds = () => [...document.querySelectorAll('#plist .pick-row')].map((el) => +el.dataset.id);
+
+  const syncTotal = () => {
+    const inp = sel('#total_price');
+    if (!inp || priceTouched) return;
+    let sum = 0;
+    selected.forEach((id) => { if (byId[id]) sum += Number(byId[id].price) || 0; });
+    inp.value = selected.size ? String(sum) : '';
+  };
+
+  const renderChips = () => {
+    const box = sel('#chips');
+    if (!box) return;
+    if (!selected.size) { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false;
+    box.innerHTML = [...selected].map((id) => {
+      const v = byId[id]; if (!v) return '';
+      return `<span class="chip" data-id="${id}">${esc(v.make)} ${esc(v.model)} <button type="button" class="chip-x" title="Fjern" aria-label="Fjern">×</button></span>`;
+    }).join('');
+  };
+
+  const updateCount = () => {
+    let sum = 0;
+    selected.forEach((id) => { if (byId[id]) sum += Number(byId[id].price) || 0; });
+    const el = sel('#sc');
+    if (el) el.textContent = `${selected.size} valgt · katalogpris ca. ${num(sum)} DKK`;
+    document.querySelectorAll('#plist .pick-row').forEach((row) => {
+      const on = selected.has(+row.dataset.id);
+      row.classList.toggle('on', on);
+      const cb = row.querySelector('input');
+      if (cb) cb.checked = on;
+    });
+    renderChips();
+    syncTotal();
+  };
+
+  const applyFilter = () => {
+    const list = sel('#plist');
+    if (!list || !free.length) return;
+    const q = (sel('#pq')?.value || '').trim().toLowerCase();
+    const fu = sel('#pfu')?.value || '';
+    const minP = sel('#pmin')?.value !== '' && sel('#pmin')?.value != null ? Number(sel('#pmin').value) : null;
+    const maxP = sel('#pmax')?.value !== '' && sel('#pmax')?.value != null ? Number(sel('#pmax').value) : null;
+    const filtered = free.filter((v) => {
+      if (fu && v.fuel !== fu) return false;
+      const price = Number(v.price) || 0;
+      if (minP != null && !Number.isNaN(minP) && price < minP) return false;
+      if (maxP != null && !Number.isNaN(maxP) && price > maxP) return false;
+      if (!q) return true;
+      const hay = [v.make, v.model, v.variant, v.vin].map((x) => String(x || '').toLowerCase()).join(' ');
+      return hay.includes(q);
+    });
+    list.innerHTML = filtered.length
+      ? filtered.map(rowHtml).join('')
+      : '<div class="muted" style="padding:.6rem">Ingen biler matcher søgning/filtre.</div>';
+    updateCount();
+  };
+
+  applyFilter();
+
+  sel('#pq')?.addEventListener('input', debounce(applyFilter, 120));
+  sel('#pfu')?.addEventListener('change', applyFilter);
+  sel('#pmin')?.addEventListener('input', debounce(applyFilter, 120));
+  sel('#pmax')?.addEventListener('input', debounce(applyFilter, 120));
+  sel('#total_price')?.addEventListener('input', () => { priceTouched = true; });
+
+  sel('#psel')?.addEventListener('click', () => {
+    visibleIds().forEach((id) => selected.add(id));
+    updateCount();
+  });
+  sel('#pclr')?.addEventListener('click', () => {
+    selected.clear();
+    priceTouched = false;
+    updateCount();
+  });
+
+  sel('#plist')?.addEventListener('change', (e) => {
+    const cb = e.target.closest('input[name=vid]');
+    if (!cb) return;
+    const id = +cb.value;
+    if (cb.checked) selected.add(id); else selected.delete(id);
+    updateCount();
+  });
+  sel('#chips')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('.chip-x');
+    if (!btn) return;
+    const id = +btn.closest('.chip').dataset.id;
+    selected.delete(id);
+    updateCount();
+  });
+
   sel('#f').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const d = Object.fromEntries(new FormData(e.target)); d.vehicle_ids = [...document.querySelectorAll('input[name=vid]:checked')].map((c) => +c.value); delete d.vid;
-    try { await api('POST', '/api/admin/packages', d); packagesPage(); } catch (err) { showErr(sel('#msg'), err); }
+    const msg = sel('#msg');
+    if (!selected.size) {
+      showErr(msg, new Error('Vælg mindst én bil til partiet.'));
+      window.scrollTo(0, 0);
+      return;
+    }
+    const d = Object.fromEntries(new FormData(e.target));
+    d.vehicle_ids = [...selected];
+    delete d.vid;
+    if (!d.total_price) {
+      let sum = 0;
+      selected.forEach((id) => { if (byId[id]) sum += Number(byId[id].price) || 0; });
+      d.total_price = sum;
+    }
+    try { await api('POST', '/api/admin/packages', d); packagesPage(); } catch (err) { showErr(msg, err); window.scrollTo(0, 0); }
   });
   document.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
     if (!confirm(`Slet partiet "${b.dataset.name}"? Bilerne i partiet bliver ikke slettet.`)) return;
