@@ -1,5 +1,5 @@
 'use strict';
-// Ensures BOTH admins (fixed passwords) and optional DEMO data (--samples).
+// Ensures BOTH admins (fixed passwords). Optional DEMO data only with --samples (never used on boot/Render).
 const path = require('node:path');
 const { openDb } = require('../src/db');
 const { ensureAdmins } = require('../src/ensure-admins');

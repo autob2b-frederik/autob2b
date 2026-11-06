@@ -20,7 +20,23 @@ function ensureAdmins(db) {
     if (sel.get(a.email)) upd.run(a.name, hash, a.email);
     else ins.run(a.email, a.name, hash);
   }
+  purgeDemoInventory(db);
   return ADMINS.map((a) => a.email);
 }
 
-module.exports = { ensureAdmins, ADMINS };
+function purgeDemoInventory(db) {
+  const demoPkgs = db.prepare(
+    `SELECT id FROM packages WHERE name LIKE 'DEMO%' COLLATE NOCASE OR name LIKE '%demo-parti%' COLLATE NOCASE OR name LIKE '%Demo-parti%' COLLATE NOCASE`
+  ).all();
+  const delPv = db.prepare('DELETE FROM package_vehicles WHERE package_id=?');
+  const delPkg = db.prepare('DELETE FROM packages WHERE id=?');
+  for (const p of demoPkgs) { delPv.run(p.id); delPkg.run(p.id); }
+  // Also unlink any package_vehicles pointing at DEMO vins, then delete vehicles
+  db.prepare(
+    `DELETE FROM package_vehicles WHERE vehicle_id IN (SELECT id FROM vehicles WHERE vin LIKE 'DEMO%')`
+  ).run();
+  const r = db.prepare(`DELETE FROM vehicles WHERE vin LIKE 'DEMO%'`).run();
+  return { packages: demoPkgs.length, vehicles: Number(r.changes || 0) };
+}
+
+module.exports = { ensureAdmins, purgeDemoInventory, ADMINS };
