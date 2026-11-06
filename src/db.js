@@ -1,0 +1,73 @@
+'use strict';
+const { DatabaseSync } = require('node:sqlite');
+
+function openDb(file) {
+  const db = new DatabaseSync(file);
+  db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+  db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    name TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('admin','dealer')),
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+    company_name TEXT, cvr TEXT, city TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS vehicles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vin TEXT NOT NULL UNIQUE,
+    make TEXT NOT NULL, model TEXT NOT NULL, variant TEXT,
+    first_registration TEXT, mileage INTEGER, fuel TEXT, transmission TEXT, color TEXT,
+    price INTEGER NOT NULL,
+    images TEXT NOT NULL DEFAULT '[]',
+    condition_report_url TEXT,
+    status TEXT NOT NULL DEFAULT 'available' CHECK (status IN ('available','reserved','sold')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE TABLE IF NOT EXISTS packages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL, total_price INTEGER NOT NULL, description TEXT,
+    status TEXT NOT NULL DEFAULT 'available' CHECK (status IN ('available','reserved','sold')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE TABLE IF NOT EXISTS package_vehicles (
+    package_id INTEGER NOT NULL REFERENCES packages(id) ON DELETE CASCADE,
+    vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+    PRIMARY KEY (package_id, vehicle_id)
+  );
+  CREATE TABLE IF NOT EXISTS orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    dealer_id INTEGER NOT NULL REFERENCES users(id),
+    vehicle_id INTEGER REFERENCES vehicles(id) ON DELETE SET NULL,
+    package_id INTEGER REFERENCES packages(id) ON DELETE SET NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('reserve','buy')),
+    status TEXT NOT NULL CHECK (status IN ('pending','confirmed','completed','cancelled','expired')),
+    price INTEGER NOT NULL,
+    item_label TEXT NOT NULL,
+    expires_at TEXT,
+    agreement TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE TABLE IF NOT EXISTS order_vehicles (
+    order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    vehicle_id INTEGER NOT NULL,
+    PRIMARY KEY (order_id, vehicle_id)
+  );
+  CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    message TEXT NOT NULL, link TEXT,
+    read INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  `);
+  return db;
+}
+module.exports = { openDb };
