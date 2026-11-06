@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const express = require('express');
 const { openDb } = require('./db');
 const A = require('./auth');
+const { ensureAdmins } = require('./ensure-admins');
 
 const FUELS = ['el', 'hybrid', 'benzin', 'diesel'];
 const TRANSMISSIONS = ['automatic', 'manual'];
@@ -53,6 +54,7 @@ function createApp(opts = {}) {
   const uploadDir = opts.uploadDir || path.join(__dirname, '..', 'uploads');
   const now = opts.now || (() => Date.now());
   const db = openDb(dbFile);
+  ensureAdmins(db);
   fs.mkdirSync(uploadDir, { recursive: true });
   const app = express();
   app.disable('x-powered-by');

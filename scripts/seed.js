@@ -1,23 +1,14 @@
 'use strict';
-// Seeds ONE admin (random password -> ADMIN_LOGIN.txt, chmod 600) and optional DEMO data (--samples).
-const fs = require('node:fs');
+// Ensures BOTH admins (fixed passwords) and optional DEMO data (--samples).
 const path = require('node:path');
-const crypto = require('node:crypto');
 const { openDb } = require('../src/db');
-const { hashPassword } = require('../src/auth');
+const { ensureAdmins } = require('../src/ensure-admins');
+
 const root = path.join(__dirname, '..');
 const db = openDb(path.join(root, 'data', 'autob2b.sqlite'));
-const EMAIL = 'frederikschrooder@gmail.com';
-const NAME = 'frederik schrøder';
-if (!db.prepare('SELECT 1 FROM users WHERE email=?').get(EMAIL)) {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789-_!#%+=';
-  const pw = Array.from(crypto.randomBytes(24), (b) => alphabet[b % alphabet.length]).join('');
-  db.prepare(`INSERT INTO users (email,name,password_hash,role,status) VALUES (?,?,?,'admin','approved')`).run(EMAIL, NAME, hashPassword(pw));
-  const f = path.join(root, 'ADMIN_LOGIN.txt');
-  fs.writeFileSync(f, `AutoB2B (lokal kopi) admin login\nURL: http://127.0.0.1:4310/login\nE-mail: ${EMAIL}\nAdgangskode: ${pw}\n`, { mode: 0o600 });
-  fs.chmodSync(f, 0o600);
-  console.log('Admin oprettet. Login gemt i ADMIN_LOGIN.txt');
-} else console.log('Admin findes allerede – uændret.');
+const emails = ensureAdmins(db);
+console.log('Admins sikret:', emails.join(', '));
+
 if (process.argv.includes('--samples') && !db.prepare(`SELECT 1 FROM vehicles WHERE vin LIKE 'DEMO%'`).get()) {
   const ins = db.prepare(`INSERT INTO vehicles (vin,make,model,variant,first_registration,mileage,fuel,transmission,color,price,images,condition_report_url) VALUES (?,?,?,?,?,?,?,?,?,?,'[]',NULL)`);
   const cars = [
